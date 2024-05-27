@@ -1,6 +1,6 @@
 # SillyTavern Files Plugin
 
-Adds an endpoint to browse and retrieve files.
+Adds an endpoint to browse, retrieve, and upload files.
 
 ```
 /api/plugins/files/list/
@@ -54,4 +54,14 @@ Adds an endpoint to browse and retrieve files.
 	file: "/backups/chat_ann_20240418-091225.jsonl"
 }
  -> TEXT
+```
+
+
+```
+/api/plugins/files/put
+{
+	path: "~/user/images/my-image.jpg",
+	file: "base64-dataURI"
+}
+ -> FINAL_FILENAME
 ```

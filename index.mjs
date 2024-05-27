@@ -69,6 +69,34 @@ export async function init(router) {
 			return res.send(JSON.parse(fs.readFileSync(filePath, 'utf-8').split('\n').slice(-1)[0]));
 		}
 	});
+
+	router.post('/put', jsonParser, (req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.join(...parts);
+		const fileDir = path.join(...parts.slice(0, -1));
+		let fileName = parts.slice(-1)[0];
+		const namePart = fileName.split('.').slice(0, -1).join('.');
+		const extPart = fileName.split('.').pop();
+		fs.mkdirSync(fileDir, { recursive:true });
+		if (fs.existsSync(path.join(fileDir, fileName))) {
+			let num = 1;
+			fileName = `${namePart}_${num}.${extPart}`;
+			while (fs.existsSync(path.join(fileDir, fileName))) num++;
+		}
+		const re = /^data:.+\/(.+);base64,(.*)$/;
+		const matches = re.exec(req.body.file);
+		const data = matches[2];
+		const buffer = Buffer.from(data, 'base64');
+		fs.writeFileSync(path.join(fileDir, fileName), buffer);
+
+		return res.send({ name: fileName });
+	});
 }
 
 export async function exit() {}
