@@ -83,6 +83,7 @@ export async function init(router) {
 		let fileName = parts.slice(-1)[0];
 		const namePart = fileName.split('.').slice(0, -1).join('.');
 		const extPart = fileName.split('.').pop();
+		console.log('[FILES/put]', { path:req.body.path, dir:fileDir, name:fileName});
 		try {
 			fs.mkdirSync(fileDir, { recursive:true });
 			if (fs.existsSync(path.join(fileDir, fileName))) {
@@ -91,15 +92,19 @@ export async function init(router) {
 				while (fs.existsSync(path.join(fileDir, fileName))) {
 					num++;
 					fileName = `${namePart}_${num}.${extPart}`;
+					console.log('[FILES/put]', { path:req.body.path, dir:fileDir, name:fileName});
 				}
 			}
-			const re = /^data:.+\/(.+);base64,(.*)$/;
-			const matches = re.exec(req.body.file);
-			const data = matches[2];
+			console.log('[FILES/put]', 'final name', { path:req.body.path, dir:fileDir, name:fileName});
+			const data = req.body.file.split(',').slice(1).join(',');
+			console.log('[FILES/put]', 'grabbed data -> buffer', { path:req.body.path, dir:fileDir, name:fileName});
 			const buffer = Buffer.from(data, 'base64');
+			console.log('[FILES/put]', 'WRITING', { path:req.body.path, dir:fileDir, name:fileName});
 			fs.writeFileSync(path.join(fileDir, fileName), buffer);
+			console.log('[FILES/put]', 'DONE', { path:req.body.path, dir:fileDir, name:fileName});
 			return res.send({ name: fileName });
-		} catch {
+		} catch(ex) {
+			console.log('[FILES/put]', 'ERROR', { path:req.body.path, dir:fileDir, name:fileName}, ex);
 			return res.sendStatus(500);
 		}
 
