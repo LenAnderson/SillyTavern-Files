@@ -3,6 +3,7 @@ import { jsonParser } from '../../src/express-common.js';
 import { createRequire } from 'module';
 const require  = createRequire(import.meta.url);
 const path = require('path');
+const mime = require('mime-types');
 const sanitize = require('sanitize-filename');
 const fs = require('fs');
 
@@ -33,6 +34,8 @@ export async function init(router) {
 			return {
 				path: item,
 				type: lstat.isDirectory() ? 'dir' : 'file',
+				fileType: lstat.isDirectory() ? null : (mime.lookup(path.join(dirPath, item)) || null)?.split('/')?.[0],
+				fileTypeFull: lstat.isDirectory() ? null : (mime.lookup(path.join(dirPath, item)) || null),
 				modified: lstat.mtimeMs,
 				size: stat.size,
 			}
