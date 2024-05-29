@@ -28,7 +28,7 @@ export async function init(router) {
 			parts.shift();
 		}
 		const dirPath = path.join(...parts);
-		const items = fs.readdirSync(dirPath).map(item=>{
+		let items = fs.readdirSync(dirPath).map(item=>{
 			const lstat = fs.lstatSync(path.join(dirPath, item));
 			const stat = fs.statSync(path.join(dirPath, item));
 			return {
@@ -40,6 +40,21 @@ export async function init(router) {
 				size: stat.size,
 			}
 		});
+		if (req.body.extensions && req.body.extensions.length > 0) {
+			const extList = req.body.extensions.map(it=>it.toLowerCase());
+			items = items.filter(item=>{
+				if (item.type != 'file') return true;
+				const ext = item.path.split('.').slice(-1)[0].toLowerCase();
+				return extList.includes(ext);
+			});
+		}
+		if (req.body.types && req.body.types.length > 0) {
+			const typeList = req.body.types.map(it=>it.toLowerCase());
+			items = items.filter(item=>{
+				if (item.type != 'file') return true;
+				return typeList.includes(item.fileType?.toLowerCase()) || typeList.includes(item.fileTypeFull?.toLowerCase());
+			});
+		}
 		items.sort((a,b)=>b.modified - a.modified);
 		return res.send(items);
 	});
