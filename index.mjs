@@ -127,6 +127,50 @@ export async function init(router) {
 		}
 
 	});
+
+	router.post('/rename', jsonParser, (req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const dirPath = path.join(...parts.slice(0, -1));
+		const oldPath = path.join(...parts);
+		const newPath = path.join(dirPath, req.body.newName);
+		if (fs.existsSync(oldPath) && fs.lstatSync(oldPath).isFile() && !fs.existsSync(newPath)) {
+			try {
+				fs.renameSync(oldPath, newPath);
+				return res.send(true);
+			} catch (ex) {
+				console.log('[FILES/rename]', 'ERROR', { path:req.body.path, oldPath, newPath}, ex);
+				return res.sendStatus(500);
+			}
+		}
+		return res.send(false);
+	});
+
+	router.post('/delete', jsonParser, (req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const oldPath = path.join(...parts);
+		if (fs.existsSync(oldPath) && fs.lstatSync(oldPath).isFile()) {
+			try {
+				fs.unlinkSync(oldPath);
+				return res.send(true);
+			} catch (ex) {
+				console.log('[FILES/delete]', 'ERROR', { path:req.body.path, oldPath }, ex);
+				return res.sendStatus(500);
+			}
+		}
+		return res.send(false);
+	});
 }
 
 export async function exit() {}
