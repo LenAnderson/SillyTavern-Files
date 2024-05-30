@@ -1,11 +1,16 @@
 import { Router } from 'express';
 import { jsonParser } from '../../src/express-common.js';
 import { createRequire } from 'module';
+import { uuidv4 } from '../../src/util.js';
+import { fileURLToPath } from 'url';
 const require  = createRequire(import.meta.url);
 const path = require('path');
 const mime = require('mime-types');
 const sanitize = require('sanitize-filename');
 const fs = require('fs');
+const jimp = require('jimp');
+const writeFileAtomicSync = require('write-file-atomic').sync;
+const open = require('open');
 
 
 
@@ -19,7 +24,7 @@ export async function init(router) {
 	});
 
 	router.post('/list', jsonParser, (req, res)=>{
-		let requestedPath = req.body.folder ?? '/';
+		let requestedPath = req.body.path ?? '/';
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
 		const parts = requestedPath.split('/');
 		parts[0] = process.cwd();
@@ -60,31 +65,94 @@ export async function init(router) {
 	});
 
 	router.post('/get', jsonParser, (req, res)=>{
-		let requestedPath = req.body.file;
+		let requestedPath = req.body.path;
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
 		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
 			parts[1] = req.user.directories.root;
 			parts.shift();
 		}
-		const filePath = path.join(...parts);
+		const filePath = path.resolve(path.join(...parts));
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			return res.sendFile(filePath);
 		}
 	});
 
 	router.post('/get/last-line', jsonParser, (req, res)=>{
-		let requestedPath = req.body.file;
+		let requestedPath = req.body.path;
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
 		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
 			parts[1] = req.user.directories.root;
 			parts.shift();
 		}
-		const filePath = path.join(...parts);
+		const filePath = path.resolve(path.join(...parts));
 		const stat = fs.statSync(filePath);
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			return res.send(JSON.parse(fs.readFileSync(filePath, 'utf-8').split('\n').slice(-1)[0]));
+		}
+	});
+
+	router.get('/thumb', async(req, res)=>{
+		let requestedPath = req.query.path?.toString() ?? '';
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const __dirname = fileURLToPath(path.dirname(import.meta.url));
+		const filePath = path.resolve(path.join(...parts));
+		const fileName = parts.slice(-1)[0];
+		const dbPath = path.resolve(__dirname, 'thumbs.json');
+		const thumbPath = path.resolve(__dirname, 'thumbs');
+		try {
+			// create db file is missing
+			if (!fs.existsSync(dbPath)) {
+				fs.writeFileSync(dbPath, '{}');
+			}
+			// create thumb directory if missing
+			if (!fs.existsSync(thumbPath)) {
+				fs.mkdirSync(thumbPath);
+			}
+
+			// check lookup for id
+			const thumbs = JSON.parse(fs.readFileSync(dbPath));
+			let id = thumbs[filePath];
+			if (!id) {
+				id = uuidv4();
+				thumbs[filePath] = id;
+				fs.writeFileSync(dbPath, JSON.stringify(thumbs));
+			}
+
+			const sizes = [100, 200, 300, 500, 800];
+			const reqW = sizes.find(it=>it >= Number(req.query.w)) ?? sizes.slice(-1)[0];
+			const reqH = sizes.find(it=>it >= Number(req.query.h)) ?? sizes.slice(-1)[0];
+			const thumbName = `${id}.${reqW}.${reqH}.png`;
+
+			if (req.query.force || !fs.existsSync(path.join(thumbPath, thumbName))) {
+				const image = await jimp.read(filePath);
+				const aspect = image.getWidth() / image.getHeight();
+				const reqAspect = reqW / reqH;
+				let w = reqW;
+				let h = reqH;
+				if (aspect > reqAspect) {
+					h = reqW / aspect;
+				} else if (aspect < reqAspect) {
+					w = reqH * aspect;
+				}
+				console.log('[FILES/thumb]', { aspect, reqAspect, reqW, reqH, w, h});
+				const buffer = await image.cover(w, h).quality(95).getBufferAsync('image/png');
+				writeFileAtomicSync(path.join(thumbPath, thumbName), buffer);
+			}
+
+			return res.sendFile(path.join(thumbPath, thumbName));
+		} catch (ex) {
+			console.log('[FILES/thumb]', 'ERROR', { path:req.query.path, dbPath, thumbPath, filePath }, ex);
+			return res.sendFile(filePath);
 		}
 	});
 
@@ -92,7 +160,8 @@ export async function init(router) {
 		let requestedPath = req.body.path;
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
 		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
 			parts[1] = req.user.directories.root;
 			parts.shift();
 		}
@@ -132,7 +201,8 @@ export async function init(router) {
 		let requestedPath = req.body.path;
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
 		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
 			parts[1] = req.user.directories.root;
 			parts.shift();
 		}
@@ -155,7 +225,8 @@ export async function init(router) {
 		let requestedPath = req.body.path;
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
 		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();if (['USER', 'HOME', '~'].includes(parts[1])) {
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
 			parts[1] = req.user.directories.root;
 			parts.shift();
 		}
@@ -170,6 +241,27 @@ export async function init(router) {
 			}
 		}
 		return res.send(false);
+	});
+
+	router.post('/reveal', jsonParser, (req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		let dirPath = filePath;
+		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+			dirPath = path.dirname(filePath);
+		}
+		if (fs.existsSync(dirPath) && fs.lstatSync(dirPath).isDirectory()) {
+			open(dirPath);
+			return res.send(true);
+		}
+		return res.sendStatus(500);
 	});
 }
 

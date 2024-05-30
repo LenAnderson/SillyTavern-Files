@@ -5,7 +5,7 @@ Adds an endpoint to browse, retrieve, and upload files.
 ```
 /api/plugins/files/list/
 {
-	folder: "/backups"
+	path: "/backups"
 }
  -> [
 		{
@@ -21,7 +21,7 @@ Adds an endpoint to browse, retrieve, and upload files.
 ```
 /api/plugins/files/list/
 {
-	folder: "~/characters"
+	path: "~/characters"
 }
  -> [
 		{
@@ -43,7 +43,7 @@ Adds an endpoint to browse, retrieve, and upload files.
 ```
 /api/plugins/files/get/
 {
-	file: "/backups/chat_ann_20240418-091225.jsonl"
+	path: "/backups/chat_ann_20240418-091225.jsonl"
 }
  -> FILE
 ```
@@ -51,9 +51,14 @@ Adds an endpoint to browse, retrieve, and upload files.
 ```
 /api/plugins/files/get/last-line
 {
-	file: "/backups/chat_ann_20240418-091225.jsonl"
+	path: "/backups/chat_ann_20240418-091225.jsonl"
 }
  -> TEXT
+```
+
+```
+/api/plugins/files/thumb?path=~&2Fuser/%2Fimages%2F/myImage.jpg&w=200&h=200&force=1
+ -> THUMBNAIL_IMAGE
 ```
 
 
@@ -61,7 +66,32 @@ Adds an endpoint to browse, retrieve, and upload files.
 /api/plugins/files/put
 {
 	path: "~/user/images/my-image.jpg",
-	file: "base64-dataURI"
+	path: "base64-dataURI"
 }
  -> FINAL_FILENAME
+```
+
+```
+/api/plugins/files/rename
+{
+	path: "~/user/images/my-image.jpg",
+	newName: "my-renamed-image.jpg"
+}
+ -> FINAL_FILENAME
+```
+
+```
+/api/plugins/files/delete
+{
+	path: "~/user/images/my-image.jpg",
+}
+ -> true
+```
+
+```
+/api/plugins/files/reveal
+{
+	path: "~/user/images",
+}
+ -> true
 ```
