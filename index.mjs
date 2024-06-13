@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { jsonParser } from '../../src/express-common.js';
 import { createRequire } from 'module';
-import { uuidv4 } from '../../src/util.js';
+import { delay, uuidv4 } from '../../src/util.js';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 const require  = createRequire(import.meta.url);
 const path = require('path');
 const mime = require('mime-types');
@@ -11,6 +12,56 @@ const fs = require('fs');
 const jimp = require('jimp');
 const writeFileAtomicSync = require('write-file-atomic').sync;
 const open = require('open');
+
+
+class Watcher {
+	/**@type {number} */ lastRequestedOn = -1;
+	/**@type {string} */ filePath;
+	/**@type {import('express').Response[]} */ responseList = [];
+}
+/**@type {Watcher[]} */
+const watchList = [];
+
+const unwatchFile = async(filePath)=>{
+	console.log('[FILES]', 'unwatchFile', filePath);
+	let w = /**@type {Watcher} */(watchList.find(it=>it.filePath == filePath));
+	if (!w) return;
+	watchList.splice(watchList.indexOf(w), 1);
+	while (w.responseList.length > 0) {
+		w.responseList.pop()?.sendFile(w.filePath);
+	}
+};
+const watchFile = async(filePath, response)=>{
+	console.log('[FILES]', 'watchFile', filePath);
+	let w = /**@type {Watcher} */(watchList.find(it=>it.filePath == filePath));
+	if (!w) {
+		console.log('[FILES]', 'watchFile', 'new watcher', filePath);
+		w = new Watcher();
+		w.filePath = filePath;
+		w.lastRequestedOn = new Date().getTime();
+		w.responseList.push(response);
+		watchList.push(w);
+		fs.watchFile(w.filePath, { interval:500 }, (curr, prev)=>{
+			if (curr.mtimeMs > prev.mtimeMs) {
+				console.log('[FILES]', 'watchFile', 'CHANGE', filePath);
+				while (w.responseList.length > 0) {
+					w.responseList.pop()?.sendFile(w.filePath);
+				}
+				w.lastRequestedOn = new Date().getTime();
+			}
+		});
+		while (w.responseList.length > 0 || w.lastRequestedOn + 2000 > new Date().getTime()) {
+			await delay(200);
+		}
+		console.log('[FILES]', 'watchFile', 'unwatching', filePath);
+		fs.unwatchFile(w.filePath);
+	} else {
+		console.log('[FILES]', 'watchFile', 'old watcher', filePath);
+		w.lastRequestedOn = new Date().getTime();
+		w.responseList.push(response);
+	}
+
+};
 
 
 
@@ -262,6 +313,54 @@ export async function init(router) {
 			return res.send(true);
 		}
 		return res.sendStatus(500);
+	});
+
+	router.post('/open', jsonParser, async(req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+			open(filePath);
+			return res.send(true);
+		}
+		return res.sendStatus(500);
+	});
+
+	router.post('/watch', jsonParser, async(req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+			await watchFile(filePath, res);
+		}
+	});
+
+	router.post('/unwatch', jsonParser, async(req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+			await unwatchFile(filePath);
+			return res.send(true);
+		}
 	});
 }
 
