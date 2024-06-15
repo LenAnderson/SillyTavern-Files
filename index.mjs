@@ -31,7 +31,7 @@ const unwatchFile = async(filePath)=>{
 		w.responseList.pop()?.sendFile(w.filePath);
 	}
 };
-const watchFile = async(filePath, response)=>{
+const watchFile = async(filePath, response, interval = 500)=>{
 	console.log('[FILES]', 'watchFile', filePath);
 	let w = /**@type {Watcher} */(watchList.find(it=>it.filePath == filePath));
 	if (!w) {
@@ -41,7 +41,7 @@ const watchFile = async(filePath, response)=>{
 		w.lastRequestedOn = new Date().getTime();
 		w.responseList.push(response);
 		watchList.push(w);
-		fs.watchFile(w.filePath, { interval:500 }, (curr, prev)=>{
+		fs.watchFile(w.filePath, { interval }, (curr, prev)=>{
 			if (curr.mtimeMs > prev.mtimeMs) {
 				console.log('[FILES]', 'watchFile', 'CHANGE', filePath);
 				while (w.responseList.length > 0) {
@@ -343,7 +343,7 @@ export async function init(router) {
 		}
 		const filePath = path.resolve(path.join(...parts));
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			await watchFile(filePath, res);
+			await watchFile(filePath, res, req.body.interval ?? 500);
 		}
 	});
 
