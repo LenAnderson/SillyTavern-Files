@@ -1,6 +1,17 @@
 # SillyTavern Files Plugin
 
-Adds an endpoint to browse, retrieve, and upload files.
+Adds an endpoint to deal with files.
+
+- browse / list files
+- retrieve files
+- retrieve last line from text files
+- retrieve image thumbnails
+- upload files
+- rename files
+- delete files
+- open folders in OS file explorer
+- open files in OS default application
+- watch file for changes
 
 ```
 /api/plugins/files/list/
@@ -11,6 +22,8 @@ Adds an endpoint to browse, retrieve, and upload files.
 		{
 			"path": "chat_ann_20240418-091225.jsonl",
 			"type": "file",
+			"fileType": null,
+			"fileTypeFull": null,
 			"modified": 1713445945679.7173,
 			"size": 104403
 		},
@@ -27,12 +40,16 @@ Adds an endpoint to browse, retrieve, and upload files.
 		{
 			"path": "Emma.png",
 			"type": "file",
+			"fileType": "image",
+			"fileTypeFull": "image/png,
 			"modified": 1713444862816.0537,
 			"size": 267611
 		},
 		{
 			"path": "Valka",
 			"type": "dir",
+			"fileType": null,
+			"fileTypeFull": null,
 			"modified": 1712975180778.4194,
 			"size": 0
 		},
@@ -58,7 +75,7 @@ Adds an endpoint to browse, retrieve, and upload files.
 
 ```
 /api/plugins/files/thumb?path=~&2Fuser/%2Fimages%2F/myImage.jpg&w=200&h=200&force=1
- -> THUMBNAIL_IMAGE
+ -> THUMBNAIL_FILE
 ```
 
 
@@ -68,7 +85,9 @@ Adds an endpoint to browse, retrieve, and upload files.
 	path: "~/user/images/my-image.jpg",
 	path: "base64-dataURI"
 }
- -> FINAL_FILENAME
+ -> {
+	name: "final-filename.jpg"
+ }
 ```
 
 ```
@@ -77,7 +96,7 @@ Adds an endpoint to browse, retrieve, and upload files.
 	path: "~/user/images/my-image.jpg",
 	newName: "my-renamed-image.jpg"
 }
- -> FINAL_FILENAME
+ -> true
 ```
 
 ```
@@ -92,6 +111,31 @@ Adds an endpoint to browse, retrieve, and upload files.
 /api/plugins/files/reveal
 {
 	path: "~/user/images",
+}
+ -> true
+```
+
+```
+/api/plugins/files/open
+{
+	path: "~/user/images/my-image.jpg",
+}
+ -> true
+```
+
+```
+/api/plugins/files/watch
+{
+	path: "~/user/my-file.txt",
+	interval: 500
+}
+ -> FILE
+```
+
+```
+/api/plugins/files/unwatch
+{
+	path: "~/user/my-file.txt"
 }
  -> true
 ```
