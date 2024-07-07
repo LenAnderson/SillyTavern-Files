@@ -364,6 +364,7 @@ export async function init(router) {
 			await unwatchFile(filePath);
 			return res.send(true);
 		}
+		return res.sendStatus(404);
 	});
 }
 
