@@ -366,6 +366,19 @@ export async function init(router) {
 		}
 		return res.sendStatus(404);
 	});
+
+	router.post('/exists', jsonParser, (req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		return res.send(fs.existsSync(filePath));
+	});
 }
 
 export async function exit() {}
