@@ -226,7 +226,7 @@ export async function init(router) {
 		console.log('[FILES/put]', { path:req.body.path, dir:fileDir, name:fileName});
 		try {
 			fs.mkdirSync(fileDir, { recursive:true });
-			if (fs.existsSync(path.join(fileDir, fileName))) {
+			if (!req.body.overwrite && fs.existsSync(path.join(fileDir, fileName))) {
 				let num = 1;
 				fileName = `${namePart}_${num}.${extPart}`;
 				while (fs.existsSync(path.join(fileDir, fileName))) {
