@@ -128,6 +128,7 @@ export async function init(router) {
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			return res.sendFile(filePath);
 		}
+		return res.sendStatus(404);
 	});
 
 	router.post('/get/last-line', jsonParser, (req, res)=>{
@@ -144,6 +145,7 @@ export async function init(router) {
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			return res.send(JSON.parse(fs.readFileSync(filePath, 'utf-8').split('\n').slice(-1)[0]));
 		}
+		return res.sendStatus(404);
 	});
 
 	router.get('/thumb', async(req, res)=>{
@@ -345,6 +347,7 @@ export async function init(router) {
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			await watchFile(filePath, res, req.body.interval ?? 500);
 		}
+		return res.sendStatus(404);
 	});
 
 	router.post('/unwatch', jsonParser, async(req, res)=>{
