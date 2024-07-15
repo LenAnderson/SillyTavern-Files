@@ -346,8 +346,9 @@ export async function init(router) {
 		const filePath = path.resolve(path.join(...parts));
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			await watchFile(filePath, res, req.body.interval ?? 500);
+		} else {
+			return res.sendStatus(404);
 		}
-		return res.sendStatus(404);
 	});
 
 	router.post('/unwatch', jsonParser, async(req, res)=>{
