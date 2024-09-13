@@ -10,7 +10,7 @@
 npm run plugins:install https://github.com/LenAnderson/SillyTavern-Files
 ```
 
-If that did not work, install it manually. Then run the following:
+If that did not work, install it manually. Run the following:
 
 ```bash
 cd plugins
