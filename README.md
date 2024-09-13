@@ -17,6 +17,8 @@ cd plugins
 git clone https://github.com/LenAnderson/SillyTavern-Files
 ```
 
+3. Don't forget to restart the SillyTavern server after the installation.
+
 ## Features
 
 Adds an endpoint to deal with files.
