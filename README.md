@@ -1,5 +1,24 @@
 # SillyTavern Files Plugin
 
+## How to install
+
+1. Before you begin, make sure you set a config `enableServerPlugins` to `true` in the config.yaml file of SillyTavern.
+
+2. Open a terminal in your SillyTavern directory and use an npm script:
+
+```bash
+npm run plugins:install https://github.com/LenAnderson/SillyTavern-Files
+```
+
+If that did not work, install it manually. Then run the following:
+
+```bash
+cd plugins
+git clone https://github.com/LenAnderson/SillyTavern-Files
+```
+
+## Features
+
 Adds an endpoint to deal with files.
 
 - browse / list files
