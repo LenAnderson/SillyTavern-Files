@@ -9,6 +9,7 @@ const path = require('path');
 const mime = require('mime-types');
 const sanitize = require('sanitize-filename');
 const fs = require('fs');
+const readline = require('readline');
 const jimp = require('jimp');
 const writeFileAtomicSync = require('write-file-atomic').sync;
 const open = require('open');
@@ -160,6 +161,38 @@ export async function init(router) {
 		const stat = fs.statSync(filePath);
 		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
 			return res.send(JSON.parse(fs.readFileSync(filePath, 'utf-8').split('\n').slice(-1)[0]));
+		}
+		return res.sendStatus(404);
+	});
+
+	router.post('/get/line', jsonParser, async(req, res)=>{
+		let requestedPath = req.body.path;
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		const stat = fs.statSync(filePath);
+		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+			let num = 0;
+			let target = req.body.line ?? 0;
+			const readable = fs.createReadStream(filePath);
+			const reader = readline.createInterface({ input: readable });
+			const line = await new Promise((resolve) => {
+				reader.on('line', (line) => {
+					if (num == target) {
+						reader.close();
+						resolve(line);
+					} else {
+						num++;
+					}
+				});
+			});
+			readable.close();
+			return res.send(line);
 		}
 		return res.sendStatus(404);
 	});
