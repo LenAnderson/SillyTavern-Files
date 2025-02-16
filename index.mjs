@@ -131,6 +131,22 @@ export async function init(router) {
 		return res.sendStatus(404);
 	});
 
+	router.get('/get', jsonParser, (req, res)=>{
+		let requestedPath = req.query.path?.toString() ?? '';
+		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
+		const parts = requestedPath.split('/');
+		parts[0] = process.cwd();
+		if (['USER', 'HOME', '~'].includes(parts[1])) {
+			parts[1] = req.user.directories.root;
+			parts.shift();
+		}
+		const filePath = path.resolve(path.join(...parts));
+		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+			return res.sendFile(filePath);
+		}
+		return res.sendStatus(404);
+	});
+
 	router.post('/get/last-line', jsonParser, (req, res)=>{
 		let requestedPath = req.body.path;
 		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
