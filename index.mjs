@@ -4,13 +4,13 @@ import { createRequire } from 'module';
 import { delay, uuidv4 } from '../../src/util.js';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
+import Jimp from '../../src/jimp.js';
 const require  = createRequire(import.meta.url);
 const path = require('path');
 const mime = require('mime-types');
 const sanitize = require('sanitize-filename');
 const fs = require('fs');
 const readline = require('readline');
-const jimp = require('jimp');
 const writeFileAtomicSync = require('write-file-atomic').sync;
 const open = require('open');
 
@@ -236,7 +236,7 @@ export async function init(router) {
 			const thumbName = `${id}.${reqW}.${reqH}.png`;
 
 			if (req.query.force || !fs.existsSync(path.join(thumbPath, thumbName))) {
-				const image = await jimp.read(filePath);
+				const image = await Jimp.read(filePath);
 				const aspect = image.getWidth() / image.getHeight();
 				const reqAspect = reqW / reqH;
 				let w = reqW;
