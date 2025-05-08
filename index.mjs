@@ -1,444 +1,331 @@
-import { Router } from 'express';
-import { jsonParser } from '../../src/express-common.js';
-import { createRequire } from 'module';
-import { delay, uuidv4 } from '../../src/util.js';
-import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
-import Jimp from '../../src/jimp.js';
-const require  = createRequire(import.meta.url);
-const path = require('path');
-const mime = require('mime-types');
-const sanitize = require('sanitize-filename');
-const fs = require('fs');
-const readline = require('readline');
-const writeFileAtomicSync = require('write-file-atomic').sync;
-const open = require('open');
+import { json, Router } from "express";
+import { argv } from "process";
+import * as fs from "fs";
+import path from "path";
+import mime from "mime-types";
+import * as readline from "readline";
 
+import { existsAsync, lstatAsync, readDirAsync, readFileAsync, statAsync, writeFileAsync } from "./src/fs.mjs";
 
-class Watcher {
-	/**@type {number} */ lastRequestedOn = -1;
-	/**@type {string} */ filePath;
-	/**@type {import('express').Response[]} */ responseList = [];
-}
-/**@type {Watcher[]} */
-const watchList = [];
-
-const unwatchFile = async(filePath)=>{
-	console.log('[FILES]', 'unwatchFile', filePath);
-	let w = /**@type {Watcher} */(watchList.find(it=>it.filePath == filePath));
-	if (!w) return;
-	watchList.splice(watchList.indexOf(w), 1);
-	while (w.responseList.length > 0) {
-		w.responseList.pop()?.sendFile(w.filePath);
-	}
-};
-const watchFile = async(filePath, response, interval = 500)=>{
-	console.log('[FILES]', 'watchFile', filePath);
-	let w = /**@type {Watcher} */(watchList.find(it=>it.filePath == filePath));
-	if (!w) {
-		console.log('[FILES]', 'watchFile', 'new watcher', filePath);
-		w = new Watcher();
-		w.filePath = filePath;
-		w.lastRequestedOn = new Date().getTime();
-		w.responseList.push(response);
-		watchList.push(w);
-		fs.watchFile(w.filePath, { interval }, (curr, prev)=>{
-			if (curr.mtimeMs > prev.mtimeMs) {
-				console.log('[FILES]', 'watchFile', 'CHANGE', filePath);
-				while (w.responseList.length > 0) {
-					w.responseList.pop()?.sendFile(w.filePath);
-				}
-				w.lastRequestedOn = new Date().getTime();
-			}
-		});
-		while (w.responseList.length > 0 || w.lastRequestedOn + 2000 > new Date().getTime()) {
-			await delay(200);
-		}
-		console.log('[FILES]', 'watchFile', 'unwatching', filePath);
-		fs.unwatchFile(w.filePath);
-	} else {
-		console.log('[FILES]', 'watchFile', 'old watcher', filePath);
-		w.lastRequestedOn = new Date().getTime();
-		w.responseList.push(response);
-	}
-
+const NO_SANDBOX_FLAG = '--files--noSandbox';
+const CONFIG = {
+	noSandbox: false,
 };
 
-
+const sendSandboxError = (res)=>res.status(403).send(sendError(`Launch SillyTavern with ${NO_SANDBOX_FLAG} to access files outside of SillyTavern\'s user data directory.`));
+const sendError = (error)=>({
+	ok: false,
+	error,
+});
+const send = (data)=>({
+	ok: true,
+	data,
+});
 
 /**
  *
+ * @param {import("express").Request} req
+ * @param {import("express").Response} res
+ * @returns {string|null}
+ */
+const resolvePath = (req, res)=>{
+	let requestedPath = path.parse(req.body?.path ?? req.query.path);
+	// deny if path has root and plugin is sandboxed
+	if (requestedPath.root.length && !CONFIG.noSandbox) {
+		sendSandboxError(res);
+		return null;
+	}
+
+	// use user dir as root if no explicit root
+	if (!requestedPath.root.length) {
+		requestedPath.dir = path.join(
+			req.user.directories.root,
+			requestedPath.dir.replace(/^(USER|HOME|~)[\\/]/, ''),
+		);
+	}
+
+	const userPath = path.resolve(req.user.directories.root);
+	const finalPath = path.resolve(path.format(requestedPath));
+
+	// if sandboxed, check that path is inside user dir
+	if (!CONFIG.noSandbox && !finalPath.startsWith(userPath)) {
+		sendSandboxError(res);
+		return null;
+	}
+
+	return finalPath;
+};
+
+/**
  * @param {Router} router
  */
-export async function init(router) {
-	router.get('/', jsonParser, (req, res)=>{
-		res.send('nothing to see here');
-	});
-
-	router.post('/list', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path ?? '/';
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const dirPath = path.join(...parts);
-		let items = fs.readdirSync(dirPath).map(item=>{
-			const lstat = fs.lstatSync(path.join(dirPath, item));
-			const stat = fs.statSync(path.join(dirPath, item));
-			return {
-				path: item,
-				type: lstat.isDirectory() ? 'dir' : 'file',
-				fileType: lstat.isDirectory() ? null : (mime.lookup(path.join(dirPath, item)) || null)?.split('/')?.[0],
-				fileTypeFull: lstat.isDirectory() ? null : (mime.lookup(path.join(dirPath, item)) || null),
-				modified: lstat.mtimeMs,
-				size: stat.size,
+const initEndpoints = (router)=>{
+	/**
+	 *
+	 * @param {string} path
+	 * @param {(req:import('express').Request, res:import('express').Response)=>Promise<any>|any} handler
+	 */
+	const get = (path, handler)=>addRoute('get', path, handler);
+	/**
+	 * @param {string} path
+	 * @param {(req:import('express').Request, res:import('express').Response)=>Promise<any>|any} handler
+	 */
+	const post = (path, handler)=>addRoute('post', path, handler);
+	/**
+	 * @param {string} path
+	 * @param {(req:import('express').Request, res:import('express').Response)=>Promise<any>|any} handler
+	 */
+	const getPost = (path, handler)=>addRoute(['get', 'post'], path, handler);
+	/**
+	 * @param {string} path
+	 * @param {(req:import('express').Request, res:import('express').Response)=>Promise<any>|any} handler
+	 */
+	const head = (path, handler)=>addRoute('head', path, handler);
+	/**
+	 * @param {string|string[]} method
+	 * @param {string} path
+	 * @param {(req:import('express').Request, res:import('express').Response)=>Promise<any>|any} handler
+	 */
+	const addRoute = (method, path, handler)=>{
+		/**
+		 * @param {import("express").Request} req
+		 * @param {import("express").Response} res
+		 * @param {import("express").NextFunction} next
+		 */
+		const mergeBodyAndQuery = (req, res, next)=>{
+			req.body = { ...(req.body ?? {}), ...(req.query ?? {})};
+			next();
+		};
+		const handledHandler = async(req, res)=>{
+			try {
+				await handler(req, res);
+			} catch (ex) {
+				const e = /**@type {Error} */ (ex);
+				res.status(500).send(sendError({
+					name: e.name,
+					message: e.message,
+					cause: e.cause,
+					stack: e.stack,
+				}));
 			}
+		};
+		for (const m of Array.isArray(method) ? method : [method]) {
+			router[m](path, mergeBodyAndQuery, handledHandler);
+		}
+	};
+
+	/**
+	 * Get information about the current plugin version
+	 * and configuration.
+	 * @returns {{
+	 * 	version: string,
+	 * 	CONFIG: { [key:string]: string }
+	 * }}
+	 * @example {}->{"version":"2.0.0", "CONFIG":{"noSandbox":true}}
+	 */
+	get('/', (req, res)=>{
+		res.send({
+			version: '2.0.0',
+			CONFIG,
 		});
-		if (req.body.extensions && req.body.extensions.length > 0) {
-			const extList = req.body.extensions.map(it=>it.toLowerCase());
-			items = items.filter(item=>{
-				if (item.type != 'file') return true;
-				const ext = item.path.split('.').slice(-1)[0].toLowerCase();
-				return extList.includes(ext);
-			});
-		}
-		if (req.body.types && req.body.types.length > 0) {
-			const typeList = req.body.types.map(it=>it.toLowerCase());
-			items = items.filter(item=>{
-				if (item.type != 'file') return true;
-				return typeList.includes(item.fileType?.toLowerCase()) || typeList.includes(item.fileTypeFull?.toLowerCase());
-			});
-		}
-		items.sort((a,b)=>b.modified - a.modified);
-		return res.send(items);
 	});
 
-	router.post('/get', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+	/**
+	 * Get a list of files and directories inside a given path.
+	 * @param {string} path The path to list contents of.
+	 * @param {string[]} [extensions] List of file extensions to limit the results to.
+	 * @param {string[]} [types] List of MIME types to limit the results to. Can be prefix (e.g., "image") or full MIME type (e.g., "image/png")
+	 * @returns {{
+	 * 	path: string,
+	 * 	type: 'dir'|'file',
+	 * 	fileType: string,
+	 * 	fileTypeFull: string,
+	 * 	modified: number,
+	 * 	size: number,
+	 * }[]}
+	 * @example {"path":"~/user/images", "extensions":["png"]}->[{
+	 * 	"path": "image_1.png",
+	 * 	"type": "file",
+	 * 	"fileType": "image",
+	 * 	"fileTypeFull": "image/png",
+	 * 	"modified": 123456789,
+	 * 	"size": 1234
+	 * }]
+	 */
+	getPost('/list', async(req, res)=>{
+		const dirPath = resolvePath(req, res);
+		if (!dirPath) return;
+
+		// filter by file extension
+		const extList = req.body.extensions?.map(it=>it.toLowerCase());
+		// filter by mime type
+		const typeList = req.body.types?.map(it=>it.toLowerCase());
+
+		const items = await Promise.all((await Promise.all(
+			(await readDirAsync(dirPath))
+				.map(async(item)=>{
+					const lstat = await lstatAsync(path.join(dirPath, item));
+					const mimeType = lstat.isDirectory() ? null : mime.lookup(item) || null;
+					return {
+						path: item,
+						type: lstat.isDirectory() ? 'dir' : 'file',
+						fileType: mimeType?.split('/')[0],
+						fileTypeFull: mimeType,
+						modified: lstat.mtimeMs,
+					};
+				})
+		))
+			.filter(item=>{
+				if (extList?.length) {
+					if (item.type != 'file') return true;
+					return extList.includes(path.extname(item.path));
+				}
+				if (typeList?.length) {
+					if (item.type != 'file') return true;
+					return typeList.includes(item.fileType?.toLowerCase()) || typeList.includes(item.fileTypeFull?.toLowerCase());
+				}
+				return true;
+			})
+			.map(async(item)=>{
+				const stat = await statAsync(path.join(dirPath, item.path));
+				return {
+					...item,
+					size: stat.size,
+				};
+			})
+		);
+		res.send(send(items));
+	});
+
+	/**
+	 * Get a file as is.
+	 * @param {string} path Path to the file.
+	 * @returns {string|ArrayBuffer}
+	 * @plainResult
+	 * @example {"path":"~/user/settings.json"}->FILE
+	 */
+	getPost('/get', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
 			return res.sendFile(filePath);
 		}
 		return res.sendStatus(404);
 	});
+	/**
+	 * Get the last line of a text file.
+	 * @param {string} path Path to the file.
+	 * @returns {string}
+	 * @example {"path":"~/user/files/someFile.txt"}->"this is the last line"
+	 */
+	getPost('/get/last-line', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
 
-	router.get('/get', jsonParser, (req, res)=>{
-		let requestedPath = req.query.path?.toString() ?? '';
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			return res.sendFile(filePath);
+		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
+			return res.send(send((await readFileAsync(filePath, { encoding:'utf-8' })).split('\n').pop()));
 		}
 		return res.sendStatus(404);
 	});
+	/**
+	 * Get the specified line of a text file.
+	 * @param {string} path Path to the file.
+	 * @param {number} line The line to retrieve.
+	 * @returns {string}
+	 * @example {"path":"~/user/files/someFile.txt", "line":42}->"this is the 42nd line"
+	 */
+	getPost('/get/line', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
 
-	router.post('/get/last-line', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		const stat = fs.statSync(filePath);
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			return res.send(JSON.parse(fs.readFileSync(filePath, 'utf-8').split('\n').slice(-1)[0]));
-		}
-		return res.sendStatus(404);
-	});
-
-	router.post('/get/line', jsonParser, async(req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		const stat = fs.statSync(filePath);
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
+		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
 			let num = 0;
 			let target = req.body.line ?? 0;
-			const readable = fs.createReadStream(filePath);
-			const reader = readline.createInterface({ input: readable });
-			const line = await new Promise((resolve) => {
-				reader.on('line', (line) => {
+			let line;
+			const readStream = fs.createReadStream(filePath);
+			const reader = readline.createInterface(readStream);
+			try {
+				for await (const curLine of reader) {
 					if (num == target) {
+						line = curLine;
 						reader.close();
-						resolve(line);
-					} else {
-						num++;
+						break;
 					}
-				});
-			});
-			readable.close();
-			return res.send(line);
-		}
-		return res.sendStatus(404);
-	});
-
-	router.get('/thumb', async(req, res)=>{
-		let requestedPath = req.query.path?.toString() ?? '';
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const __dirname = fileURLToPath(path.dirname(import.meta.url));
-		const filePath = path.resolve(path.join(...parts));
-		const fileName = parts.slice(-1)[0];
-		const dbPath = path.resolve(__dirname, 'thumbs.json');
-		const thumbPath = path.resolve(__dirname, 'thumbs');
-		try {
-			// create db file is missing
-			if (!fs.existsSync(dbPath)) {
-				fs.writeFileSync(dbPath, '{}');
-			}
-			// create thumb directory if missing
-			if (!fs.existsSync(thumbPath)) {
-				fs.mkdirSync(thumbPath);
-			}
-
-			// check lookup for id
-			const thumbs = JSON.parse(fs.readFileSync(dbPath));
-			let id = thumbs[filePath];
-			if (!id) {
-				id = uuidv4();
-				thumbs[filePath] = id;
-				fs.writeFileSync(dbPath, JSON.stringify(thumbs));
-			}
-
-			const sizes = [100, 200, 300, 500, 800];
-			const reqW = sizes.find(it=>it >= Number(req.query.w)) ?? sizes.slice(-1)[0];
-			const reqH = sizes.find(it=>it >= Number(req.query.h)) ?? sizes.slice(-1)[0];
-			const thumbName = `${id}.${reqW}.${reqH}.png`;
-
-			if (req.query.force || !fs.existsSync(path.join(thumbPath, thumbName))) {
-				const image = await Jimp.read(filePath);
-				const aspect = image.getWidth() / image.getHeight();
-				const reqAspect = reqW / reqH;
-				let w = reqW;
-				let h = reqH;
-				if (aspect > reqAspect) {
-					h = reqW / aspect;
-				} else if (aspect < reqAspect) {
-					w = reqH * aspect;
-				}
-				console.log('[FILES/thumb]', { aspect, reqAspect, reqW, reqH, w, h});
-				const buffer = await image.cover(w, h).quality(95).getBufferAsync('image/png');
-				writeFileAtomicSync(path.join(thumbPath, thumbName), buffer);
-			}
-
-			return res.sendFile(path.join(thumbPath, thumbName));
-		} catch (ex) {
-			console.log('[FILES/thumb]', 'ERROR', { path:req.query.path, dbPath, thumbPath, filePath }, ex);
-			return res.sendFile(filePath);
-		}
-	});
-
-	router.post('/put', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.join(...parts);
-		const fileDir = path.join(...parts.slice(0, -1));
-		let fileName = parts.slice(-1)[0];
-		const namePart = fileName.split('.').slice(0, -1).join('.');
-		const extPart = fileName.split('.').pop();
-		console.log('[FILES/put]', { path:req.body.path, dir:fileDir, name:fileName});
-		try {
-			fs.mkdirSync(fileDir, { recursive:true });
-			if (!req.body.overwrite && fs.existsSync(path.join(fileDir, fileName))) {
-				let num = 1;
-				fileName = `${namePart}_${num}.${extPart}`;
-				while (fs.existsSync(path.join(fileDir, fileName))) {
 					num++;
-					fileName = `${namePart}_${num}.${extPart}`;
-					console.log('[FILES/put]', { path:req.body.path, dir:fileDir, name:fileName});
+				}
+			} catch (ex) {
+				readStream.destroy();
+				throw ex;
+			} finally {
+				if (!readStream.destroyed) {
+					readStream.destroy();
 				}
 			}
-			console.log('[FILES/put]', 'final name', { path:req.body.path, dir:fileDir, name:fileName});
-			const data = req.body.file.split(',').slice(1).join(',');
-			console.log('[FILES/put]', 'grabbed data -> buffer', { path:req.body.path, dir:fileDir, name:fileName});
-			const buffer = Buffer.from(data, 'base64');
-			console.log('[FILES/put]', 'WRITING', { path:req.body.path, dir:fileDir, name:fileName});
-			fs.writeFileSync(path.join(fileDir, fileName), buffer);
-			console.log('[FILES/put]', 'DONE', { path:req.body.path, dir:fileDir, name:fileName});
-			return res.send({ name: fileName });
-		} catch(ex) {
-			console.log('[FILES/put]', 'ERROR', { path:req.body.path, dir:fileDir, name:fileName}, ex);
-			return res.sendStatus(500);
-		}
-
-	});
-
-	router.post('/rename', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const dirPath = path.join(...parts.slice(0, -1));
-		const oldPath = path.join(...parts);
-		const newPath = path.join(dirPath, req.body.newName);
-		if (fs.existsSync(oldPath) && fs.lstatSync(oldPath).isFile() && !fs.existsSync(newPath)) {
-			try {
-				fs.renameSync(oldPath, newPath);
-				return res.send(true);
-			} catch (ex) {
-				console.log('[FILES/rename]', 'ERROR', { path:req.body.path, oldPath, newPath}, ex);
-				return res.sendStatus(500);
-			}
-		}
-		return res.send(false);
-	});
-
-	router.post('/delete', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const oldPath = path.join(...parts);
-		if (fs.existsSync(oldPath) && fs.lstatSync(oldPath).isFile()) {
-			try {
-				fs.unlinkSync(oldPath);
-				return res.send(true);
-			} catch (ex) {
-				console.log('[FILES/delete]', 'ERROR', { path:req.body.path, oldPath }, ex);
-				return res.sendStatus(500);
-			}
-		}
-		return res.send(false);
-	});
-
-	router.post('/reveal', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		let dirPath = filePath;
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			dirPath = path.dirname(filePath);
-		}
-		if (fs.existsSync(dirPath) && fs.lstatSync(dirPath).isDirectory()) {
-			open(dirPath);
-			return res.send(true);
-		}
-		return res.sendStatus(500);
-	});
-
-	router.post('/open', jsonParser, async(req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			open(filePath);
-			return res.send(true);
-		}
-		return res.sendStatus(500);
-	});
-
-	router.post('/watch', jsonParser, async(req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			await watchFile(filePath, res, req.body.interval ?? 500);
-		} else {
-			return res.sendStatus(404);
-		}
-	});
-
-	router.post('/unwatch', jsonParser, async(req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
-		}
-		const filePath = path.resolve(path.join(...parts));
-		if (fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()) {
-			await unwatchFile(filePath);
-			return res.send(true);
+			return res.send(send(line));
 		}
 		return res.sendStatus(404);
 	});
 
-	router.post('/exists', jsonParser, (req, res)=>{
-		let requestedPath = req.body.path;
-		if (requestedPath[0] != '/') requestedPath = `/${requestedPath}`;
-		const parts = requestedPath.split('/');
-		parts[0] = process.cwd();
-		if (['USER', 'HOME', '~'].includes(parts[1])) {
-			parts[1] = req.user.directories.root;
-			parts.shift();
+	/**
+	 * Write / upload a file.
+	 * @param {string} path Path to the file.
+	 * @param {boolean} [overwrite] Whether to overwrite an existing file or automatically create a new filename.
+	 * @param {string} [text] Text contents of the file.
+	 * @param {string} [file] Base64 encoded binary contents of the file.
+	 * @returns {{
+	 * 	path:string,
+	 * 	name:string,
+	 * }}
+	 */
+	getPost('/put', async(req, res)=>{
+		let filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		const parsed = path.parse(filePath);
+		fs.mkdirSync(parsed.dir, { recursive:true });
+		if (!req.body.overwrite && await existsAsync(filePath)) {
+			let num = 1;
+			let fileName = parsed.name
+			while (await existsAsync(path.join(parsed.dir, `${fileName}_${num}${parsed.ext}`))) {
+				num++;
+			}
+			parsed.name = `${fileName}_${num}`;
+			filePath = path.format(parsed);
 		}
-		const filePath = path.resolve(path.join(...parts));
-		return res.send(fs.existsSync(filePath));
+
+		if (req.body.text) {
+			await writeFileAsync(filePath, req.body.text, { encoding:'utf-8' });
+		} else if (req.body.file) {
+			const data = req.body.file.split(',').slice(1).join(',');
+			const buffer = Buffer.from(data, 'base64');
+			await writeFileAsync(filePath, buffer, {});
+		} else {
+			throw new Error('missing content');
+		}
+		return res.send(send({ path: filePath, name: parsed.base }));
 	});
+};
+/**
+ * @param {Router} router
+ */
+async function init(router) {
+	// check server startup args
+	CONFIG.noSandbox = argv.includes(NO_SANDBOX_FLAG);
+
+	// always parse JSON
+	router.use(json());
+	initEndpoints(router);
 }
 
-export async function exit() {}
+async function exit() {}
 
 const module = {
     init,
     exit,
     info: {
-        id: 'files',
-        name: 'Files',
+        id: 'files-v2',
+        name: 'Files v2',
         description: '...',
     },
 };

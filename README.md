@@ -1,141 +1,139 @@
-# SillyTavern Files Plugin
+# SillyTavern - Files Plugin v2
 
-Adds an endpoint to deal with files.
+Adds endpoints to access local files.
 
-- browse / list files
-- retrieve files
-- retrieve last line from text files
-- retrieve image thumbnails
-- upload files
-- rename files
-- delete files
-- open folders in OS file explorer
-- open files in OS default application
-- watch file for changes
+## Configuration
 
+Launch SillyTavern with the `--files--noSandbox` to access directories
+outside of the current user's data directory.
+
+```bash
+node server.js --files--noSandbox
 ```
-/api/plugins/files/list/
+
+
+## Endpoints
+
+### `/api/plugins/files-v2/` [GET]
+
+Get information about the current plugin version
+and configuration.
+
+**Arguments:**
+
+*(no arguments)*
+
+**Returns:**
+```
+
 {
-	path: "/backups"
+	ok: boolean,
+	error: string,
+	data: {
+    	version: string,
+    	CONFIG: { [key:string]: string }
+    },
 }
- -> [
-		{
-			"path": "chat_ann_20240418-091225.jsonl",
-			"type": "file",
-			"fileType": null,
-			"fileTypeFull": null,
-			"modified": 1713445945679.7173,
-			"size": 104403
-		},
-		...
-	]
 ```
 
+### `/api/plugins/files-v2/list` [GET, POST]
+
+Get a list of files and directories inside a given path.
+
+**Arguments:**
+
+- `path`: `{string}` - The path to list contents of.
+- *(optional)* `extensions`: `{string[]}` - List of file extensions to limit the results to.
+- *(optional)* `types`: `{string[]}` - List of MIME types to limit the results to. Can be prefix (e.g., "image") or full MIME type (e.g., "image/png")
+
+**Returns:**
 ```
-/api/plugins/files/list/
+
 {
-	path: "~/characters"
+	ok: boolean,
+	error: string,
+	data: {
+    	path: string,
+    	type: 'dir'|'file',
+    	fileType: string,
+    	fileTypeFull: string,
+    	modified: number,
+    	size: number,
+    }[],
 }
- -> [
-		{
-			"path": "Emma.png",
-			"type": "file",
-			"fileType": "image",
-			"fileTypeFull": "image/png,
-			"modified": 1713444862816.0537,
-			"size": 267611
-		},
-		{
-			"path": "Valka",
-			"type": "dir",
-			"fileType": null,
-			"fileTypeFull": null,
-			"modified": 1712975180778.4194,
-			"size": 0
-		},
-		...
-	]
 ```
 
+### `/api/plugins/files-v2/get` [GET, POST]
+
+Get a file as is.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+
+**Returns:**
 ```
-/api/plugins/files/get/
+string|ArrayBuffer
+```
+
+### `/api/plugins/files-v2/get/last-line` [GET, POST]
+
+Get the last line of a text file.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+
+**Returns:**
+```
+
 {
-	path: "/backups/chat_ann_20240418-091225.jsonl"
+	ok: boolean,
+	error: string,
+	data: string,
 }
- -> FILE
 ```
 
+### `/api/plugins/files-v2/get/line` [GET, POST]
+
+Get the specified line of a text file.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+- `line`: `{number}` - The line to retrieve.
+
+**Returns:**
 ```
-/api/plugins/files/get/last-line
+
 {
-	path: "/backups/chat_ann_20240418-091225.jsonl"
+	ok: boolean,
+	error: string,
+	data: string,
 }
- -> TEXT
 ```
 
-```
-/api/plugins/files/thumb?path=~&2Fuser/%2Fimages%2F/myImage.jpg&w=200&h=200&force=1
- -> THUMBNAIL_FILE
+### `/api/plugins/files-v2/put` [GET, POST]
+
+Write / upload a file.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+- *(optional)* `overwrite`: `{boolean}` - Whether to overwrite an existing file or automatically create a new filename.
+- *(optional)* `text`: `{string}` - Text contents of the file.
+- *(optional)* `file`: `{string}` - Base64 encoded binary contents of the file.
+
+**Returns:**
 ```
 
-
-```
-/api/plugins/files/put
 {
-	path: "~/user/images/my-image.jpg",
-	path: "base64-dataURI"
+	ok: boolean,
+	error: string,
+	data: {
+    	path:string,
+    	name:string,
+    },
 }
- -> {
-	name: "final-filename.jpg"
- }
 ```
 
-```
-/api/plugins/files/rename
-{
-	path: "~/user/images/my-image.jpg",
-	newName: "my-renamed-image.jpg"
-}
- -> true
-```
-
-```
-/api/plugins/files/delete
-{
-	path: "~/user/images/my-image.jpg",
-}
- -> true
-```
-
-```
-/api/plugins/files/reveal
-{
-	path: "~/user/images",
-}
- -> true
-```
-
-```
-/api/plugins/files/open
-{
-	path: "~/user/images/my-image.jpg",
-}
- -> true
-```
-
-```
-/api/plugins/files/watch
-{
-	path: "~/user/my-file.txt",
-	interval: 500
-}
- -> FILE
-```
-
-```
-/api/plugins/files/unwatch
-{
-	path: "~/user/my-file.txt"
-}
- -> true
-```
