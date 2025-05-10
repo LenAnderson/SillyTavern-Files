@@ -137,3 +137,21 @@ Write / upload a file.
 }
 ```
 
+### `/api/plugins/files-v2/count/lines` [GET, POST]
+
+Count the number of lines in a text file.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: number,
+}
+```
+

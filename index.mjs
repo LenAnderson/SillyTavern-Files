@@ -305,6 +305,38 @@ const initEndpoints = (router)=>{
 		}
 		return res.send(send({ path: filePath, name: parsed.base }));
 	});
+
+	/**
+	 * Count the number of lines in a text file.
+	 * @param {string} path Path to the file.
+	 * @returns {number}
+	 */
+	getPost('/count/lines', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (await existsAsync(filePath) && (await fs.lstatSync(filePath)).isFile()) {
+			let num = 0;
+			let line;
+			const readStream = fs.createReadStream(filePath);
+			const reader = readline.createInterface(readStream);
+			try {
+				for await (const curLine of reader) {
+					num++;
+				}
+				reader.close();
+			} catch (ex) {
+				readStream.destroy();
+				throw ex;
+			} finally {
+				if (!readStream.destroyed) {
+					readStream.destroy();
+				}
+			}
+			return res.send(send(num));
+		}
+		return res.sendStatus(404);
+	});
 };
 /**
  * @param {Router} router
