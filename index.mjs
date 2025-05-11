@@ -224,7 +224,26 @@ const initEndpoints = (router)=>{
 		if (!filePath) throw new Error('missing path');
 
 		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
-			return res.send(send((await readFileAsync(filePath, { encoding:'utf-8' })).split('\n').pop()));
+			let num = 0;
+			let prevLine;
+			let line = '';
+			const readStream = fs.createReadStream(filePath);
+			const reader = readline.createInterface(readStream);
+			try {
+				for await (const curLine of reader) {
+					[prevLine, line] = [line, curLine];
+					num++;
+				}
+				reader.close();
+			} catch (ex) {
+				readStream.destroy();
+				throw ex;
+			} finally {
+				if (!readStream.destroyed) {
+					readStream.destroy();
+				}
+			}
+			return res.send(send(line.length ? line : prevLine));
 		}
 		return res.sendStatus(404);
 	});
