@@ -340,7 +340,7 @@ const initEndpoints = (router)=>{
 		const filePath = resolvePath(req, res);
 		if (!filePath) throw new Error('missing path');
 
-		if (await existsAsync(filePath) && (await fs.lstatSync(filePath)).isFile()) {
+		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
 			let num = 0;
 			let line;
 			const readStream = fs.createReadStream(filePath);
