@@ -1,4 +1,4 @@
-import { access, exists, lstat, readdir, readFile, stat, Stats, writeFile } from "node:fs";
+import { access, exists, lstat, readdir, readFile, rename, stat, Stats, writeFile } from "node:fs";
 
 /** @type {((path:string|Buffer|URL, options:{encoding:BufferEncoding})=>Promise<string>) & ((path:string|Buffer|URL, options:null)=>Promise<string|Buffer>)} */
 export const readFileAsync = async(path, options)=>{
@@ -14,6 +14,16 @@ export const readFileAsync = async(path, options)=>{
 export const writeFileAsync = async(path, data, options)=>{
     return new Promise((resolve, reject)=>{
         writeFile(path, data, options, (err)=>{
+            if (err) reject(err);
+            else resolve();
+        });
+    });
+};
+
+/**@type {((oldPath:import("node:fs").PathLike, newPath:import("node:fs").PathLike)=>Promise<void>)} */
+export const renameAsync = async(oldPath, newPath)=>{
+    return new Promise((resolve, reject)=>{
+        rename(oldPath, newPath, (err)=>{
             if (err) reject(err);
             else resolve();
         });
