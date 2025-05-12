@@ -163,7 +163,7 @@ const initEndpoints = (router)=>{
 		if (!dirPath) return;
 
 		// filter by file extension
-		const extList = req.body.extensions?.map(it=>it.toLowerCase());
+		const extList = req.body.extensions?.map(it=>`${it[0] == '.' ? '' : '.'}${it.toLowerCase()}`);
 		// filter by mime type
 		const typeList = req.body.types?.map(it=>it.toLowerCase());
 
