@@ -137,6 +137,59 @@ Write / upload a file.
 }
 ```
 
+### `/api/plugins/files-v2/rename` [GET, POST]
+
+Rename a file.
+
+**Arguments:**
+
+- `path`: `{string}` - The old path.
+- `newName`: `{string}` - The new filename.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: boolean,
+}
+```
+
+### `/api/plugins/files-v2/delete` [GET, POST]
+
+Delete a file.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: boolean,
+}
+```
+
+### `/api/plugins/files-v2/thumb` [GET, POST]
+
+Get a thumbnail of the image.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+- `w`: `{number}` - Width
+- `h`: `{number}` - Height
+- *(optional)* `force`: `{boolean}` - Whether to generate a new thumbnail or use a cached one (if available).
+
+**Returns:**
+```
+ArrayBuffer
+```
+
 ### `/api/plugins/files-v2/count/lines` [GET, POST]
 
 Count the number of lines in a text file.
@@ -152,6 +205,42 @@ Count the number of lines in a text file.
 	ok: boolean,
 	error: string,
 	data: number,
+}
+```
+
+### `/api/plugins/files-v2/reveal` [GET, POST]
+
+Open the path in the OS file explorer.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the directory or file.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: boolean,
+}
+```
+
+### `/api/plugins/files-v2/open` [GET, POST]
+
+Open the file in the OS default application.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: boolean,
 }
 ```
 
