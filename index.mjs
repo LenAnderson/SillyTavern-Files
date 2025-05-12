@@ -10,6 +10,8 @@ import { uuidv4 } from "../../src/util.js";
 import Jimp from "../../src/jimp.js";
 import { error } from "console";
 import open from "open";
+import { log } from "./src/console.mjs";
+import { WatcherManager } from "./src/WatcherManager.mjs";
 
 const NO_SANDBOX_FLAG = '--files--noSandbox';
 const CONFIG = {
@@ -505,7 +507,42 @@ const initEndpoints = (router)=>{
 			open(filePath);
 			return res.send(send(true));
 		}
-		throw new Error('Not a file.');
+		throw new Error('not a file');
+	});
+
+	/**
+	 * Check if the file or directory exists.
+	 * @param {string} path Path to the file.
+	 * @returns {boolean}
+	 */
+	getPost('/exists', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (await existsAsync(filePath)) {
+			return res.send(send(true));
+		}
+		return res.send(send(false));
+	});
+
+	/**
+	 * Watch a file for changes.
+	 * @param {string} path Path to the file.
+	 * @param {number} interval How often the target should be polled in milliseconds.
+	 * @returns {EventSource}
+	 * @plainResult
+	 * @keepReturns
+	 * @manual
+	 */
+	get('/watch', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (!await existsAsync(filePath)) {
+			throw new Error('not a file')
+		}
+		const userHandle = req.user.profile.handle;
+		WatcherManager.instance.start(userHandle, filePath, res, parseInt((req.body.interval ?? 500).toString()));
 	});
 };
 /**

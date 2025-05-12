@@ -244,3 +244,35 @@ Open the file in the OS default application.
 }
 ```
 
+### `/api/plugins/files-v2/exists` [GET, POST]
+
+Check if the file or directory exists.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: boolean,
+}
+```
+
+### `/api/plugins/files-v2/watch` [GET]
+
+Watch a file for changes.
+
+**Arguments:**
+
+- `path`: `{string}` - Path to the file.
+- `interval`: `{number}` - How often the target should be polled in milliseconds.
+
+**Returns:**
+```
+EventSource
+```
+

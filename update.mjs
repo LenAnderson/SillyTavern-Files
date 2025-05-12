@@ -18,6 +18,8 @@ class Route {
 	/**@type {Param[]} */ paramList = [];
 	/**@type {Returns} */ returns;
 	/**@type {boolean} */ isPlainResult = false;
+	/**@type {boolean} */ isKeepReturns = false;
+	/**@type {boolean} */ isManual = false;
 
 	toJSON() {
 		return {
@@ -143,6 +145,10 @@ for (let line of lines) {
 					inReturns = true;
 				} else if (line.startsWith('@plainResult')) {
 					currentRoute.isPlainResult = true;
+				} else if (line.startsWith('@keepReturns')) {
+					currentRoute.isKeepReturns = true;
+				} else if (line.startsWith('@manual')) {
+					currentRoute.isManual = true;
 				}
 				afterHelp = true;
 			} else {
@@ -178,7 +184,11 @@ import { getRequestHeaders } from '../../../../script.js';
 import { API } from './index.js';
 
 
+const { promise, resolve } = Promise.withResolvers();
+
 export class FilesPluginApi {
+	static /**@type {Promise<typeof FilesPluginApi>}*/ ready = promise;
+	static /**@type {()=>typeof FilesPluginApi}*/ readyResolve = resolve;
 `;
 for (const route of routeList) {
 	let name = pathToApi(route.path);
@@ -205,15 +215,32 @@ for (const route of routeList) {
 	 * @param {${param.type}} [options.${param.name}] ${param.help}`;
 	}
 	if (route.isPlainResult) {
-		api += `
+		if (route.isKeepReturns) {
+			api += `
+	 * @returns {Promise<${indent(route.returns.type, 1, 1, ' *')}>} ${route.returns.help ?? ''}`
+		} else {
+			api += `
 	 * @returns {Promise<Response>} Fetch response`;
+		}
 	} else {
 		api += `
 	 * @returns {Promise<${indent(route.returns.type, 1, 1, ' *')}>} ${route.returns.help ?? ''}`;
 	}
 	api += `
-	 */
-	static async ${name || 'plugin'}(${params}${hasOptions ? ', options = {}' : ''}) {
+	 */`;
+	if (route.isManual) {
+		api += `
+	static async ${name || 'plugin'}(...args) {
+		await FilesPluginApi.ready;
+		return FilesPluginApi.${name || 'plugin'}(...args);
+	}
+	`;
+		continue;
+	} else {
+		api += `
+	static async ${name || 'plugin'}(${params}${hasOptions ? ', options = {}' : ''}) {`;
+	}
+	api += `
 		const response = await fetch(\`\${API}${route.path}\`, {
 			method: '${route.method.at(-1)}',`;
 	if (route.method.at(-1) == 'POST') {
@@ -263,31 +290,37 @@ import { FilesPluginApi } from './api.js';
 export const API = '/api/plugins/files-v2';
 
 
+
+export const registerSlash = ()=>{
 `;
 for (const route of routeList) {
+	if (route.isManual) continue;
 	slash += `
-SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'files-${pathToSlash(route.path)}',
-	/**
-	 * @param {NamedArguments&{`;
+	SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'files-${pathToSlash(route.path)}',
+		/**
+		 * @param {NamedArguments&{`;
 	for (const param of route.paramList) {
 		slash += `
-	 *	${param.name}:string`;
+	     *	${param.name}:string`;
 	}
 	slash +=`
-	 * }} args
-	 * @param {string} value
-	 */
-	async callback(args, value) {
-		const result = await FilesPluginApi.${pathToApi(route.path) || 'plugin'}(${route.paramList.filter(it=>!it.isOptional).map(it=>`args.${it.name}`).join(', ')});
-		return JSON.stringify(result);
-	},
-	namedArgumentList: [],
-	unnamedArgumentList: [],
-	helpString: ${JSON.stringify(route.help)},
-	returns: ${JSON.stringify(route.returns.help ?? '')},
-}));
+		 * }} args
+		 * @param {string} value
+		 */
+		async callback(args, value) {
+			const result = await FilesPluginApi.${pathToApi(route.path) || 'plugin'}(${route.paramList.filter(it=>!it.isOptional).map(it=>`args.${it.name}`).join(', ')});
+			return JSON.stringify(result);
+		},
+		namedArgumentList: [],
+		unnamedArgumentList: [],
+		helpString: ${JSON.stringify(route.help)},
+		returns: ${JSON.stringify(route.returns.help ?? '')},
+	}));
 `;
 }
+slash += `
+};
+`;
 slash = slash.replace(/\t/g, ' '.repeat(4));
 
 
@@ -348,5 +381,5 @@ md += `
 
 
 writeFileSync(path.join('public', 'scripts', 'extensions', 'third-party', 'SillyTavern-FilesPluginApi', 'api.js'), api, { encoding:"utf-8" });
-writeFileSync(path.join('public', 'scripts', 'extensions', 'third-party', 'SillyTavern-FilesPluginApi', 'index.js'), slash, { encoding:"utf-8" });
+writeFileSync(path.join('public', 'scripts', 'extensions', 'third-party', 'SillyTavern-FilesPluginApi', 'slash.js'), slash, { encoding:"utf-8" });
 writeFileSync(path.join(import.meta.dirname, 'README.md'), md, { encoding:"utf-8" });
