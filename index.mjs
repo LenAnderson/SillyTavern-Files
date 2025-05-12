@@ -5,7 +5,11 @@ import path from "path";
 import mime from "mime-types";
 import * as readline from "readline";
 
-import { existsAsync, lstatAsync, readDirAsync, readFileAsync, statAsync, writeFileAsync } from "./src/fs.mjs";
+import { existsAsync, lstatAsync, readDirAsync, readFileAsync, renameAsync, statAsync, writeFileAsync } from "./src/fs.mjs";
+import { uuidv4 } from "../../src/util.js";
+import Jimp from "../../src/jimp.js";
+import { error } from "console";
+import open from "open";
 
 const NO_SANDBOX_FLAG = '--files--noSandbox';
 const CONFIG = {
@@ -332,6 +336,110 @@ const initEndpoints = (router)=>{
 	});
 
 	/**
+	 * Rename a file.
+	 * @param {string} path The old path.
+	 * @param {string} newName The new filename.
+	 * @returns {boolean}
+	 */
+	getPost('/rename', async(req, res)=>{
+		let filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		const parsed = path.parse(filePath);
+		const newPath = resolvePath(req, res, path.join(...req.body.path.split(/[/\\]/).slice(0,-1), req.body.newName));
+		if (!newPath) throw new Error('missing new path');
+
+		if (!(await existsAsync(filePath) && (await lstatAsync(filePath)).isFile())) {
+			throw new Error('not a file');
+		}
+		if (await existsAsync(newPath)) {
+			throw new Error('file already exists');
+		}
+		await renameAsync(filePath, newPath);
+		return res.send(send(true));
+	});
+
+	/**
+	 * Delete a file.
+	 * @param {string} path Path to the file.
+	 * @returns {boolean}
+	 */
+	getPost('/delete', async(req, res)=>{
+		let filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (!(await existsAsync(filePath) && (await lstatAsync(filePath)).isFile())) {
+			throw new Error('not a file');
+		}
+		await fs.unlinkSync(filePath);
+		return res.send(send(true));
+	});
+
+	/**
+	 * Get a thumbnail of the image.
+	 * @param {string} path Path to the file.
+	 * @param {number} w Width
+	 * @param {number} h Height
+	 * @param {boolean} [force] Whether to generate a new thumbnail or use a cached one (if available).
+	 * @returns {ArrayBuffer}
+	 * @plainResult
+	 */
+	getPost('/thumb', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
+			try {
+				const pluginPath = import.meta.dirname;
+				const parsedPath = path.parse(filePath);
+				const dbPath = path.join(pluginPath, 'thumbs.json');
+				const thumbDir = path.join(pluginPath, 'thumbs');
+				if (!fs.existsSync(dbPath)) {
+					fs.writeFileSync(dbPath, '{}', { encoding:'utf-8' });
+				}
+				if (!await existsAsync(thumbDir)) {
+					fs.mkdirSync(thumbDir, { recursive:true });
+				}
+
+				const thumbs = JSON.parse(fs.readFileSync(dbPath, { encoding:'utf-8' }));
+				let id = thumbs[filePath];
+				if (!id) {
+					id = uuidv4();
+					thumbs[filePath] = id;
+					fs.writeFileSync(dbPath, JSON.stringify(thumbs), { encoding:'utf-8' });
+				}
+
+				const sizes = [100, 200, 300, 500, 800];
+				const reqW = sizes.find(it=>it >= Number(req.body.w)) ?? sizes.slice(-1)[0];
+				const reqH = sizes.find(it=>it >= Number(req.body.h)) ?? sizes.slice(-1)[0];
+				const thumbName = `${id}.${reqW}.${reqH}.png`;
+				const thumbPath = path.join(thumbDir, thumbName);
+
+				if (req.body.force || !await existsAsync(thumbPath)) {
+					const image = await Jimp.read(filePath);
+					const aspect = image.width / image.height;
+					const reqAspect = reqW / reqH;
+					let w = reqW;
+					let h = reqH;
+					if (aspect > reqAspect) {
+						h = reqW / aspect;
+					} else if (aspect < reqAspect) {
+						w = reqH * aspect;
+					}
+					const buffer = await image.cover({ w, h }).getBuffer('image/png');
+					await writeFileAsync(thumbPath, buffer, {});
+				}
+
+				return res.sendFile(thumbPath);
+			} catch (ex) {
+				error('/thumb', filePath, ex);
+				return res.sendFile(filePath);
+			}
+		}
+		return res.sendStatus(404);
+	});
+
+	/**
 	 * Count the number of lines in a text file.
 	 * @param {string} path Path to the file.
 	 * @returns {number}
@@ -361,6 +469,43 @@ const initEndpoints = (router)=>{
 			return res.send(send(num));
 		}
 		return res.sendStatus(404);
+	});
+
+
+	/**
+	 * Open the path in the OS file explorer.
+	 * @param {string} path Path to the directory or file.
+	 * @returns {boolean}
+	 */
+	getPost('/reveal', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (await existsAsync(filePath)) {
+			let dirPath = filePath;
+			if ((await lstatAsync(filePath)).isFile()) {
+				dirPath = path.dirname(filePath);
+			}
+			open(dirPath);
+			return res.send(send(true));
+		}
+		throw new Error('Not found.');
+	});
+
+	/**
+	 * Open the file in the OS default application.
+	 * @param {string} path Path to the file.
+	 * @returns {boolean}
+	 */
+	getPost('/open', async(req, res)=>{
+		const filePath = resolvePath(req, res);
+		if (!filePath) throw new Error('missing path');
+
+		if (await existsAsync(filePath) && (await lstatAsync(filePath)).isFile()) {
+			open(filePath);
+			return res.send(send(true));
+		}
+		throw new Error('Not a file.');
 	});
 };
 /**
