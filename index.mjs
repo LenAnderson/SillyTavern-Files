@@ -26,10 +26,11 @@ const send = (data)=>({
  *
  * @param {import("express").Request} req
  * @param {import("express").Response} res
+ * @param {string} [explicitPath]
  * @returns {string|null}
  */
-const resolvePath = (req, res)=>{
-	let requestedPath = path.parse(req.body?.path ?? req.query.path);
+const resolvePath = (req, res, explicitPath = undefined)=>{
+	let requestedPath = path.parse(explicitPath ?? req.body?.path ?? req.query.path);
 	// deny if path has root and plugin is sandboxed
 	if (requestedPath.root.length && !CONFIG.noSandbox) {
 		sendSandboxError(res);
@@ -38,9 +39,14 @@ const resolvePath = (req, res)=>{
 
 	// use user dir as root if no explicit root
 	if (!requestedPath.root.length) {
+		if (requestedPath.dir.length == 0 && requestedPath.base == '~') {
+			requestedPath.dir = requestedPath.base;
+			requestedPath.base = '';
+			requestedPath.name = '';
+		}
 		requestedPath.dir = path.join(
 			req.user.directories.root,
-			requestedPath.dir.replace(/^(USER|HOME|~)[\\/]/, ''),
+			requestedPath.dir.replace(/^(USER|HOME|~)([\\/]|$)/, ''),
 		);
 	}
 
