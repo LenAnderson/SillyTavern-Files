@@ -1,8 +1,12 @@
-import { unwatchFile, watchFile } from "node:fs";
+import { watch } from "node:fs";
 import { EventStream } from "./EventStream.mjs";
 import { log } from "./console.mjs";
 import { delay } from "../../../src/util.js";
 import EventEmitter from "node:events";
+import { existsAsync } from "./fs.mjs";
+import path from "node:path";
+
+/**@typedef {{filePath:string, stream:EventStream}} WatchItem */
 
 export class Watcher {
     /** @readonly */
@@ -15,66 +19,87 @@ export class Watcher {
 
 
 
-	/**@type {string} */ filePath;
-	/**@type {number} */ interval;
+	/**@type {string} */ dirPath;
 
+	/**@type {import("node:fs").FSWatcher} */ watcher;
 	/**@type {boolean} */ isWatching = false;
-	/**@type {EventStream[]} */ streamList = [];
+	/**@type {WatchItem[]} */ streamList = [];
+
+	/**@type {Set<string>} */ queue = new Set();
+	/**@type {boolean} */ isProcessingQueue = false;
 
 	/**@type {EventEmitter} */ eventSource =new EventEmitter();
 
 
-	constructor(filePath, interval) {
-		this.filePath = filePath;
-		this.interval = interval;
+	constructor(dirPath) {
+		this.dirPath = dirPath;
 	}
 
 	async start() {
 		if (this.isWatching) return;
 		this.isWatching = true;
-		log('[w]', 'watch', this.filePath);
-		const listener = (curr, prev)=>{
-			if (curr.mtimeMs > prev.mtimeMs) {
-				log('[w]', 'CHANGE', this.filePath);
-				for (const stream of this.streamList) {
-					stream.writeUpdate({ path:this.filePath });
-				}
-			}
-		};
-		watchFile(this.filePath, { interval: this.interval }, listener);
-		while (this.streamList.length > 0) {
-			await delay(200);
-		}
-		unwatchFile(this.filePath, listener);
-		this.isWatching = false;
-		this.eventSource.emit(Watcher.EVENT.STOP, this);
-		log('[w]', 'unwatch', this.filePath);
+		log('[w]', 'watch', this.dirPath);
+		this.watcher = watch(this.dirPath, {}, (event, filename)=>{
+			if (filename === null) return;
+			this.queue.add(filename);
+			this.processQueue();
+		});
 	}
 
 	stop() {
-		log('[w]', 'stop', this.filePath);
+		log('[w]', 'stop', this.dirPath);
+		this.isWatching = false;
+		this.watcher?.close();
 		while (this.streamList.pop());
+		this.eventSource.emit(Watcher.EVENT.STOP, this);
 	}
 
 
 	/**
+	 * @param {string} filePath
 	 * @param {EventStream} stream
 	 */
-	async add(stream) {
-		log('[w]', 'add', this.streamList.length, this.filePath);
-		this.streamList.push(stream);
-		stream.eventSource.on(EventStream.EVENT.CLOSE, ()=>this.remove(stream));
+	async add(filePath, stream) {
+		log('[w]', 'add', this.streamList.length, this.dirPath);
+		const item = { filePath, stream };
+		this.streamList.push(item);
+		stream.eventSource.on(EventStream.EVENT.CLOSE, ()=>this.remove(item));
 		this.start();
 	}
 
 	/**
-	 * @param {EventStream} stream
+	 * @param {WatchItem} item
 	 */
-	async remove(stream) {
-		log('[w]', 'remove', this.streamList.length, this.filePath);
-		const idx = this.streamList.indexOf(stream);
+	async remove(item) {
+		log('[w]', 'remove', this.streamList.length, this.dirPath);
+		const idx = this.streamList.indexOf(item);
 		if (idx > -1) {
 			this.streamList.splice(idx, 1);
 		}
+		if (!this.streamList.length) {
+			this.stop();
+		}
+	}
+
+
+	async processQueue() {
+		if (this.isProcessingQueue) return;
+		if (!this.queue.size) return;
+		this.isProcessingQueue = true;
+		await delay(500);
+		while (this.queue.size) {
+			const filename = [...this.queue][0];
+			this.queue.delete(filename);
+			const filePath = path.join(this.dirPath, filename);
+			const streams = this.streamList.filter(it=>it.filePath == filePath);
+			for (const item of streams) {
+				const exists = await existsAsync(filePath);
+				const data = { filePath, exists };
+				log('[w]', 'update', data);
+				item.stream.writeUpdate(data);
+			}
+		}
+		this.isProcessingQueue = false;
+		this.processQueue();
 	}
 }

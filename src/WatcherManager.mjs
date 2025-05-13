@@ -1,10 +1,10 @@
 /**@typedef {import("express").Response} Response */
 /**@typedef {import("node:fs").FSWatcher} FSWatcher */
 
-import { watch, watchFile } from "node:fs";
 import { EventStream } from "./EventStream.mjs";
 import { log } from "./console.mjs";
 import { Watcher } from "./Watcher.mjs";
+import path from "node:path";
 
 
 export class WatcherManager {
@@ -34,9 +34,10 @@ export class WatcherManager {
 	 */
 	start(userHandle, filePath, res, interval) {
 		log('[wm]', 'start', userHandle, filePath);
-		let w = this.watcherList.find(it=>it.filePath == filePath && it.interval == interval);
+		const dirPath = path.parse(filePath).dir;
+		let w = this.watcherList.find(it=>it.dirPath == dirPath);
 		if (!w) {
-			w = new Watcher(filePath, interval);
+			w = new Watcher(dirPath);
 			w.eventSource.on(Watcher.EVENT.STOP, ()=>{
 				if (w) {
 					const idx = this.watcherList.indexOf(w);
@@ -47,7 +48,7 @@ export class WatcherManager {
 			});
 			this.watcherList.push(w);
 		}
-		w.add(new EventStream(userHandle, res));
+		w.add(filePath, new EventStream(userHandle, res));
 	}
 
 	stopAll() {
