@@ -1,6 +1,7 @@
 /**@typedef {import("express").Response} Response */
 
 import EventEmitter from "node:events";
+import { uuidv4 } from "../../../src/util.js";
 
 
 export class EventStream {
@@ -14,6 +15,7 @@ export class EventStream {
 
 
 
+	/**@type {string} */ token;
 	/**@type {string} */ userHandle;
 	/**@type {Response} */ res;
 
@@ -25,6 +27,7 @@ export class EventStream {
 	 * @param {Response} res
 	 */
 	constructor(userHandle, res) {
+		this.token = uuidv4();
 		this.userHandle = userHandle;
 		this.res = res;
 
@@ -36,6 +39,7 @@ export class EventStream {
 			'Connection': "keep-alive",
 			'Content-Encoding': 'none',
 		});
+		this.writeToken();
 	}
 
 
@@ -43,6 +47,13 @@ export class EventStream {
 		this.res.write(`data: ${JSON.stringify({type, data})}\n\n`);
 	}
 
+
+	writeToken() {
+		this.write('token', this.token);
+	}
+	writeWatcherToken(watcherToken) {
+		this.write('watcherToken', { watcherToken });
+	}
 
 	writeUpdate(data) {
 		this.write('update', data);

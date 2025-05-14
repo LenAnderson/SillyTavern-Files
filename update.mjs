@@ -20,6 +20,7 @@ class Route {
 	/**@type {boolean} */ isPlainResult = false;
 	/**@type {boolean} */ isKeepReturns = false;
 	/**@type {boolean} */ isManual = false;
+	/**@type {boolean} */ noSlash = false;
 
 	toJSON() {
 		return {
@@ -149,6 +150,8 @@ for (let line of lines) {
 					currentRoute.isKeepReturns = true;
 				} else if (line.startsWith('@manual')) {
 					currentRoute.isManual = true;
+				} else if (line.startsWith('@noSlash')) {
+					currentRoute.noSlash = true;
 				}
 				afterHelp = true;
 			} else {
@@ -181,6 +184,7 @@ const indent = (text, level, offset = 0, prefix = '')=>{
 let api = `
 import { getRequestHeaders } from '../../../../script.js';
 
+import { WatcherEventSource } from './WatcherEventSource.js';
 import { API } from './index.js';
 
 
@@ -295,6 +299,7 @@ export const registerSlash = ()=>{
 `;
 for (const route of routeList) {
 	if (route.isManual) continue;
+	if (route.noSlash) continue;
 	slash += `
 	SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'files-${pathToSlash(route.path)}',
 		/**

@@ -528,8 +528,8 @@ const initEndpoints = (router)=>{
 	/**
 	 * Watch a file for changes.
 	 * @param {string} path Path to the file.
-	 * @param {number} interval How often the target should be polled in milliseconds.
-	 * @returns {EventSource}
+	 * @param {string} [eventSourceToken] Token to connect to the same EventSource.
+	 * @returns {WatcherEventSource}
 	 * @plainResult
 	 * @keepReturns
 	 * @manual
@@ -542,7 +542,22 @@ const initEndpoints = (router)=>{
 			throw new Error('not a file')
 		}
 		const userHandle = req.user.profile.handle;
-		WatcherManager.instance.start(userHandle, filePath, res, parseInt((req.body.interval ?? 500).toString()));
+		const streamToken = req.body.token;
+		const watcherToken = WatcherManager.instance.start(userHandle, filePath, res, streamToken);
+		if (streamToken) {
+			res.send(send({ watcherToken }));
+		}
+	});
+
+	/**
+	 * Stop watching a file for changes.
+	 * @param {string} watcherToken Token specific to the watcher to close.
+	 * @returns {boolean}
+	 * @noSlash
+	 */
+	getPost('/unwatch', async(req, res)=>{
+		WatcherManager.instance.stop(req.body.watcherToken);
+		res.send(send(true));
 	});
 };
 /**

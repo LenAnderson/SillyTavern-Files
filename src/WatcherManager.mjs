@@ -5,6 +5,7 @@ import { EventStream } from "./EventStream.mjs";
 import { log } from "./console.mjs";
 import { Watcher } from "./Watcher.mjs";
 import path from "node:path";
+import { uuidv4 } from "../../../src/util.js";
 
 
 export class WatcherManager {
@@ -21,6 +22,8 @@ export class WatcherManager {
 
 	/**@type {Watcher[]} */
 	watcherList = [];
+	/**@type {{[token:string]:EventStream}} */
+	streams = {};
 
 
 
@@ -29,11 +32,12 @@ export class WatcherManager {
 	 *
 	 * @param {string} userHandle
 	 * @param {string} filePath
-	 * @param {number} interval
+	 * @param {string} [streamToken]
 	 * @param {Response} res
 	 */
-	start(userHandle, filePath, res, interval) {
-		log('[wm]', 'start', userHandle, filePath);
+	start(userHandle, filePath, res, streamToken = undefined) {
+		log('[wm]', 'start', userHandle, streamToken, filePath);
+		const watcherToken = uuidv4();
 		const dirPath = path.parse(filePath).dir;
 		let w = this.watcherList.find(it=>it.dirPath == dirPath);
 		if (!w) {
@@ -48,7 +52,31 @@ export class WatcherManager {
 			});
 			this.watcherList.push(w);
 		}
-		w.add(filePath, new EventStream(userHandle, res));
+		/**@type {EventStream} */
+		let stream;
+		if (streamToken) {
+			if (this.streams[streamToken]) {
+				stream = this.streams[streamToken];
+			} else {
+				throw new Error('invalid token');
+			}
+		} else {
+			stream = new EventStream(userHandle, res);
+			stream.writeWatcherToken(watcherToken);
+			this.streams[stream.token] = stream;
+		}
+		w.add(filePath, stream, watcherToken);
+		return watcherToken;
+	}
+
+	stop(watcherToken) {
+		const w = this.watcherList.find(w=>w.streamList.some(s=>s.watcherToken == watcherToken));
+		if (w) {
+			const item = w.streamList.find(s=>s.watcherToken == watcherToken);
+			if (item) {
+				w.remove(item);
+			}
+		}
 	}
 
 	stopAll() {

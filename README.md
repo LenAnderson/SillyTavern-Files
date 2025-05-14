@@ -269,10 +269,28 @@ Watch a file for changes.
 **Arguments:**
 
 - `path`: `{string}` - Path to the file.
-- `interval`: `{number}` - How often the target should be polled in milliseconds.
+- *(optional)* `eventSourceToken`: `{string}` - Token to connect to the same EventSource.
 
 **Returns:**
 ```
-EventSource
+WatcherEventSource
+```
+
+### `/api/plugins/files-v2/unwatch` [GET, POST]
+
+Stop watching a file for changes.
+
+**Arguments:**
+
+- `watcherToken`: `{string}` - Token specific to the watcher to close.
+
+**Returns:**
+```
+
+{
+	ok: boolean,
+	error: string,
+	data: boolean,
+}
 ```
 

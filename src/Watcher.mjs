@@ -6,7 +6,7 @@ import EventEmitter from "node:events";
 import { existsAsync } from "./fs.mjs";
 import path from "node:path";
 
-/**@typedef {{filePath:string, stream:EventStream}} WatchItem */
+/**@typedef {{filePath:string, stream:EventStream, watcherToken:string}} WatchItem */
 
 export class Watcher {
     /** @readonly */
@@ -59,9 +59,9 @@ export class Watcher {
 	 * @param {string} filePath
 	 * @param {EventStream} stream
 	 */
-	async add(filePath, stream) {
+	async add(filePath, stream, watcherToken) {
 		log('[w]', 'add', this.streamList.length, this.dirPath);
-		const item = { filePath, stream };
+		const item = { filePath, stream, watcherToken };
 		this.streamList.push(item);
 		stream.eventSource.on(EventStream.EVENT.CLOSE, ()=>this.remove(item));
 		this.start();
@@ -94,7 +94,7 @@ export class Watcher {
 			const streams = this.streamList.filter(it=>it.filePath == filePath);
 			for (const item of streams) {
 				const exists = await existsAsync(filePath);
-				const data = { filePath, exists };
+				const data = { filePath, exists, watcherToken:item.watcherToken };
 				log('[w]', 'update', data);
 				item.stream.writeUpdate(data);
 			}
