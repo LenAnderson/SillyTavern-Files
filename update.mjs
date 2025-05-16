@@ -282,7 +282,7 @@ api = api.replace(/\t/g, ' '.repeat(4));
 
 let slash = `
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
-import { SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
+import { SlashCommandNamedArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 
 /**@typedef {import('../../../slash-commands/SlashCommand.js').NamedArguments} NamedArguments */
@@ -316,7 +316,22 @@ for (const route of routeList) {
 			const result = await FilesPluginApi.${pathToApi(route.path) || 'plugin'}(${route.paramList.filter(it=>!it.isOptional).map(it=>`args.${it.name}`).join(', ')});
 			return JSON.stringify(result);
 		},
-		namedArgumentList: [],
+		namedArgumentList: [`;
+	for (const param of route.paramList) {
+		let type = 'ARGUMENT_TYPE.STRING';
+		if (param.type.endsWith('[]')) type = 'ARGUMENT_TYPE.LIST';
+		else if (param.type.startsWith('string')) type = 'ARGUMENT_TYPE.STRING';
+		else if (param.type.startsWith('number')) type = 'ARGUMENT_TYPE.NUMBER';
+		else if (param.type.startsWith('boolean')) type = 'ARGUMENT_TYPE.BOOLEAN';
+		slash += `
+	    SlashCommandNamedArgument.fromProps({ name: '${param.name}',
+			description: '${param.help}',
+			typeList: ${type},
+			isRequired: ${!param.isOptional},
+		}),`;
+	}
+	slash +=`
+		],
 		unnamedArgumentList: [],
 		helpString: ${JSON.stringify(route.help)},
 		returns: ${JSON.stringify(route.returns.help ?? '')},
